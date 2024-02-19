@@ -1,5 +1,6 @@
 /* See LICENSE for licence details. */
 #define _XOPEN_SOURCE 600
+// #define SDL_2
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,11 +22,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <libgen.h>
-
+#ifdef SDL_2 
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_thread.h>
+#define SDL_WM_SetCaption(in, in2) do { /* Do nothing */ } while(0)
+//#include <SDL/SDL_ttf.h>
+#else
 #include <SDL/SDL.h>
 #include <SDL/SDL_thread.h>
-//#include <SDL/SDL_ttf.h>
-
+#endif
 #include "font.h"
 #include "keyboard.h"
 #include "msg_queue.h"
@@ -61,7 +66,11 @@
 #define REDRAW_TIMEOUT (80*1000) /* 80 ms */
 
 /* macros */
+#ifdef SDL_2
+#define CLEANMASK(mask) (mask & (KMOD_SHIFT|KMOD_CTRL|KMOD_ALT|KMOD_GUI))
+#else
 #define CLEANMASK(mask) (mask & (KMOD_SHIFT|KMOD_CTRL|KMOD_ALT|KMOD_META))
+#endif
 #define SERRNO strerror(errno)
 #define MIN(a, b)  ((a) < (b) ? (a) : (b))
 #define MAX(a, b)  ((a) < (b) ? (b) : (a))
@@ -211,8 +220,13 @@ typedef struct {
 } XWindow;
 
 typedef struct {
+#ifdef SDL_2
+	SDL_Keycode k;
+	SDL_Keymod mask;
+#else
 	SDLKey k;
 	SDLMod mask;
+#endif
 	char s[ESC_BUF_SIZ];
 } Key;
 
@@ -239,8 +253,13 @@ typedef union {
 } Arg;
 
 typedef struct {
+#ifdef SDL_2
+	SDL_Keymod mod;
+	SDL_Keycode keysym;
+#else
 	SDLMod mod;
 	SDLKey keysym;
+#endif
 	void (*func)(const Arg *);
 	const Arg arg;
 } Shortcut;
@@ -250,7 +269,9 @@ static void xzoom(const Arg *);
 
 /* Config.h for applying patches and the configuration. */
 #include "config.h"
-
+#ifdef SDL_2
+SDL_Window *Screen;
+#endif
 SDL_Surface* screen;
 #if defined(MIYOOMINI) || defined(TRIMUISMART) || defined(RG35XX)
 SDL_Surface* screen2;
@@ -323,7 +344,11 @@ static void xresize(int, int);
 static void expose(SDL_Event *);
 static void visibility(SDL_Event *);
 static void unmap(SDL_Event *);
+#ifdef SDL_2
+static char *kmap(SDL_Keycode, SDL_Keymod);
+#else
 static char *kmap(SDLKey, SDLMod);
+#endif
 static void kpress(SDL_Event *);
 static void cresize(int width, int height);
 static void resize(SDL_Event *);
@@ -354,12 +379,27 @@ static void *xmalloc(size_t);
 static void *xrealloc(void *, size_t);
 static void *xcalloc(size_t nmemb, size_t size);
 static void xflip(void);
-
+#ifdef SDL_2
+static void (*handler[SDL_LASTEVENT])(SDL_Event *) = {
+#else
 static void (*handler[SDL_NUMEVENTS])(SDL_Event *) = {
+#endif
 	[SDL_KEYDOWN] = kpress,
+#ifdef SDL_2
+	[SDL_WINDOWEVENT_RESIZED] = resize,
+	[SDL_WINDOWEVENT_SIZE_CHANGED] = resize,
+	[SDL_WINDOWEVENT_EXPOSED] = expose,
+	[SDL_WINDOWEVENT_SHOWN] = activeEvent,
+	[SDL_WINDOWEVENT_HIDDEN] = activeEvent,
+	[SDL_WINDOWEVENT_FOCUS_GAINED] = activeEvent,
+	[SDL_WINDOWEVENT_FOCUS_LOST] = activeEvent,
+	[SDL_WINDOWEVENT_LEAVE] = activeEvent,
+	[SDL_WINDOWEVENT_ENTER] = activeEvent,
+#else
 	[SDL_VIDEORESIZE] = resize,
 	[SDL_VIDEOEXPOSE] = expose,
 	[SDL_ACTIVEEVENT] = activeEvent,
+#endif
 	[SDL_MOUSEMOTION] = bmotion,
 	[SDL_MOUSEBUTTONDOWN] = bpress,
 	[SDL_MOUSEBUTTONUP] = brelease,
@@ -508,10 +548,11 @@ xflip(void) {
 #else
 	SDL_BlitSurface(xw.win, NULL, screen, NULL);
 	draw_keyboard(screen);
-	if(SDL_Flip(screen)) {
-	        //fputs("FLIP ERROR\n", stderr);
-		//exit(EXIT_FAILURE);
-	}
+#ifdef SDL_2
+	SDL_UpdateWindowSurface(Screen); //Update the screen
+#else
+	SDL_Flip(screen);
+#endif
 #endif
 }
 
@@ -2347,7 +2388,10 @@ SDL_Thread *thread = NULL;
 void sdlshutdown(void) {
 	if(SDL_WasInit(SDL_INIT_EVERYTHING) != 0) {
 		fprintf(stderr, "SDL shutdown\n");
+#ifndef SDL_2
 		if(thread) SDL_KillThread(thread);
+#endif
+
 		if(xw.win) SDL_FreeSurface(xw.win);
 #if defined(MIYOOMINI) || defined(TRIMUISMART) || defined(RG35XX)
 		if(screen2) SDL_FreeSurface(screen2);
@@ -2361,16 +2405,20 @@ void
 sdlinit(void) {
 	//const SDL_VideoInfo *vi;
 	fprintf(stderr, "SDL init\n");
-
+	fprintf(stderr, "Line %d\n",__LINE__);
 	//dc.font = dc.ifont = dc.bfont = dc.ibfont = NULL;
 
 	if(SDL_Init(SDL_INIT_VIDEO) == -1) {
+		fprintf(stderr, "Line %d\n",__LINE__);
 		fprintf(stderr,"Unable to initialize SDL: %s\n", SDL_GetError());
 		exit(EXIT_FAILURE);
 	}
+	fprintf(stderr, "Line %d\n",__LINE__);
 
 	fprintf(stderr, "SDL font\n");
+#ifndef SDL_2
 	SDL_EnableUNICODE(1);
+#endif	
 
 	/*if(TTF_Init() == -1) {
 		printf("TTF_Init: %s\n", TTF_GetError());
@@ -2384,8 +2432,10 @@ sdlinit(void) {
 	//vi = SDL_GetVideoInfo();
 
 	/* font */
+	fprintf(stderr, "Line %d\n",__LINE__);
 	usedfont = (opt_font == NULL)? font : opt_font;
 	sdlloadfonts(usedfont, fontsize);
+	fprintf(stderr, "Line %d\n",__LINE__);
 
 	fprintf(stderr, "SDL font\n");
 	/* colors */
@@ -2419,7 +2469,20 @@ sdlinit(void) {
 	setenv("SDL_USE_PAN", "true", 1);						// allow DOUBLEBUF
 	if(!(screen = SDL_SetVideoMode(240, 320, 16, SDL_HWSURFACE | SDL_DOUBLEBUF))) {	// rotated LCD
 #else
+	#ifdef SDL_2
+	SDL_DisplayMode current;
+	SDL_GetCurrentDisplayMode(0, &current);
+	Screen = SDL_CreateWindow("Test Joystick", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, current.w, current.h, SDL_WINDOW_FULLSCREEN);
+    if (!Screen) {
+		fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+		exit(EXIT_FAILURE);
+	}
+	//Get window surface
+    screen = SDL_GetWindowSurface(Screen);
+    if (!screen) {
+	#else
 	if(!(screen = SDL_SetVideoMode(320, 240, 16, SDL_HWSURFACE | SDL_DOUBLEBUF))) {
+	#endif
 #endif
 		fprintf(stderr,"Unable to set video mode: %s\n", SDL_GetError());
 		exit(EXIT_FAILURE);
@@ -2434,7 +2497,11 @@ sdlinit(void) {
 	sdlresettitle();
 	//
 	// TODO: might need to use system threads
+#ifdef SDL_2
+	if(!(thread = SDL_CreateThread(ttythread, "ST",NULL))) {
+#else
 	if(!(thread = SDL_CreateThread(ttythread, NULL))) {
+#endif
 		fprintf(stderr, "Unable to create thread: %s\n", SDL_GetError());
 		exit(EXIT_FAILURE);
 	}
@@ -2444,9 +2511,15 @@ sdlinit(void) {
 	//cresize(vi->current_w, vi->current_h);
 
     //SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, SDL_DEFAULT_REPEAT_INTERVAL);
-	SDL_EnableKeyRepeat(200, 20);
+	
 
+#ifdef SDL_2
+	// SDL_SetKeyboardRepeat(200, 20);
+	SDL_Event event = {.type = SDL_WINDOWEVENT_EXPOSED };
+#else
+	SDL_EnableKeyRepeat(200, 20);
 	SDL_Event event = {.type = SDL_VIDEOEXPOSE };
+#endif
 	SDL_PushEvent(&event);
 }
 
@@ -2598,7 +2671,9 @@ xdrawcursor(void) {
 
 void
 sdlresettitle(void) {
+#ifndef SDL_2
 	SDL_WM_SetCaption(opt_title ? opt_title : "st", NULL);
+#endif
 }
 
 void
@@ -2663,6 +2738,42 @@ drawregion(int x1, int y1, int x2, int y2) {
 	xdrawcursor();
 }
 
+#ifdef SDL_2
+void activeEvent(SDL_Event *ev) {
+	switch(ev->window.event) {
+		case SDL_WINDOWEVENT_FOCUS_LOST:
+		case SDL_WINDOWEVENT_LEAVE:
+		case SDL_WINDOWEVENT_HIDDEN:
+			visibility(ev);
+			unmap(ev);
+		case SDL_WINDOWEVENT_FOCUS_GAINED:
+		case SDL_WINDOWEVENT_ENTER:
+		case SDL_WINDOWEVENT_SHOWN:
+			visibility(ev);
+			focus(ev);
+			break;
+	}
+}
+
+void
+focus(SDL_Event *ev) {
+	if(ev->window.event == SDL_WINDOWEVENT_FOCUS_GAINED || ev->window.event == SDL_WINDOWEVENT_ENTER ||  ev->window.event == SDL_WINDOWEVENT_SHOWN) {
+		xw.state |= WIN_FOCUSED;
+	} else {
+		xw.state &= ~WIN_FOCUSED;
+	}
+}
+
+void
+visibility(SDL_Event *ev) {
+	if(ev->window.event == SDL_WINDOWEVENT_FOCUS_LOST || ev->window.event == SDL_WINDOWEVENT_LEAVE || ev->window.event == SDL_WINDOWEVENT_HIDDEN) {
+		xw.state &= ~WIN_VISIBLE;
+	} else if(!(xw.state & WIN_VISIBLE)) {
+		/* need a full redraw for next Expose, not just a buf copy */
+		xw.state |= WIN_VISIBLE | WIN_REDRAW;
+	}
+}
+#else
 void activeEvent(SDL_Event *ev) {
 	switch(ev->active.type) {
 		case SDL_APPACTIVE:
@@ -2677,9 +2788,12 @@ void activeEvent(SDL_Event *ev) {
 }
 
 void
-expose(SDL_Event *ev) {
-	(void)ev;
-	xw.state |= WIN_VISIBLE | WIN_REDRAW;
+focus(SDL_Event *ev) {
+	if(ev->active.gain) {
+		xw.state |= WIN_FOCUSED;
+	} else {
+		xw.state &= ~WIN_FOCUSED;
+	}
 }
 
 void
@@ -2693,6 +2807,13 @@ visibility(SDL_Event *ev) {
 		xw.state |= WIN_VISIBLE | WIN_REDRAW;
 	}
 }
+#endif
+
+void
+expose(SDL_Event *ev) {
+	(void)ev;
+	xw.state |= WIN_VISIBLE | WIN_REDRAW;
+}
 
 void
 unmap(SDL_Event *ev) {
@@ -2700,22 +2821,16 @@ unmap(SDL_Event *ev) {
 	xw.state &= ~WIN_VISIBLE;
 }
 
-void
-focus(SDL_Event *ev) {
-	if(ev->active.gain) {
-		xw.state |= WIN_FOCUSED;
-#if 0
-		xseturgency(0);
-#endif
-	} else {
-		xw.state &= ~WIN_FOCUSED;
-	}
-}
-
 char*
+#ifdef SDL_2
+kmap(SDL_Keycode k, SDL_Keymod state) {
+	int i;
+	SDL_Keymod mask;
+#else
 kmap(SDLKey k, SDLMod state) {
 	int i;
 	SDLMod mask;
+#endif
 
 	for(i = 0; i < LEN(key); i++) {
 		mask = key[i].mask;
@@ -2733,8 +2848,11 @@ kpress(SDL_Event *ev) {
 	SDL_KeyboardEvent *e = &ev->key;
 	char buf[32], *customkey;
 	int meta, shift, i;
+#ifdef SDL_2
+	SDL_Keycode ksym = e->keysym.sym;
+#else
 	SDLKey ksym = e->keysym.sym;
-
+#endif	
 	if (IS_SET(MODE_KBDLOCK))
 		return;
 
@@ -2782,6 +2900,7 @@ kpress(SDL_Event *ev) {
 			}
 			break;
 			/* 3. X lookup  */
+#ifndef SDL_2
 		default:
 			if(e->keysym.unicode) {
 				long u = e->keysym.unicode;
@@ -2791,6 +2910,7 @@ kpress(SDL_Event *ev) {
 				ttywrite(buf, len);
 			}
 			break;
+#endif
 		}
 	}
 }
@@ -2817,7 +2937,20 @@ cresize(int width, int height)
 #elif TRIMUISMART
 	if(!(screen = SDL_SetVideoMode(240, 320, 16, SDL_HWSURFACE | SDL_DOUBLEBUF))) {
 #else
+	#ifdef SDL_2
+	SDL_DisplayMode current;
+	SDL_GetCurrentDisplayMode(0, &current);
+	Screen = SDL_CreateWindow("Test Joystick", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, current.w, current.h, SDL_WINDOW_FULLSCREEN);
+    if (!Screen) {
+		fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+		exit(EXIT_FAILURE);
+	}
+	//Get window surface
+    screen = SDL_GetWindowSurface(Screen);
+    if (!screen) {
+	#else
 	if(!(screen = SDL_SetVideoMode(320, 240, 16, SDL_HWSURFACE | SDL_DOUBLEBUF))) {
+	#endif
 #endif
 		fprintf(stderr,"Unable to set video mode: %s\n", SDL_GetError());
 		exit(EXIT_FAILURE);
@@ -2835,6 +2968,15 @@ cresize(int width, int height)
 	ttyresize();
 }
 
+#ifdef SDL_2
+void
+resize(SDL_Event *e) {
+	if(e->window.data1 == xw.w && e->window.data2 == xw.h)
+		return;
+
+	cresize(e->window.data1, e->window.data2);
+}
+#else
 void
 resize(SDL_Event *e) {
 	if(e->resize.w == xw.w && e->resize.h == xw.h)
@@ -2842,6 +2984,7 @@ resize(SDL_Event *e) {
 
 	cresize(e->resize.w, e->resize.h);
 }
+#endif
 
 int ttythread(void *unused) {
 	int i;
@@ -2935,15 +3078,22 @@ run(void) {
         }
 
         switch(ev.type) {
-            case SDL_VIDEORESIZE:
-            case SDL_VIDEOEXPOSE:
+#ifdef SDL_2
+            case SDL_WINDOWEVENT_RESIZED:
+			case SDL_WINDOWEVENT_EXPOSED:
+#else
+			case SDL_VIDEORESIZE:
+			case SDL_VIDEOEXPOSE:
+#endif
             case SDL_USEREVENT:
                 draw();
         }
         xflip();
     }
 
-    SDL_KillThread(thread);
+#ifndef SDL_2
+		if(thread) SDL_KillThread(thread);
+#endif
 }
 
 int
@@ -2952,7 +3102,7 @@ main(int argc, char *argv[]) {
 
     xw.fw = xw.fh = xw.fx = xw.fy = 0;
     xw.isfixed = false;
-
+	fprintf(stderr, "Line %d\n",__LINE__);
     for(i = 1; i < argc; i++) {
         switch(argv[i][0] != '-' || argv[i][2] ? -1 : argv[i][1]) {
             case 'c':
@@ -3020,13 +3170,20 @@ main(int argc, char *argv[]) {
 		snprintf(preload_libname, PATH_MAX + 17, "%s/libst-preload.so", path); */
 
 run:
+	fprintf(stderr, "Line %d\n",__LINE__);
     setlocale(LC_CTYPE, "");
     tnew((initial_width - 2) / 6, (initial_height - 2) / 8);
+	fprintf(stderr, "Line %d\n",__LINE__);
     ttynew();
+	fprintf(stderr, "Line %d\n",__LINE__);
     sdlinit(); /* Must have TTY before cresize */
+	fprintf(stderr, "Line %d\n",__LINE__);
     init_keyboard();
+	fprintf(stderr, "Line %d\n",__LINE__);
     selinit();
+	fprintf(stderr, "Line %d\n",__LINE__);
     run();
+	fprintf(stderr, "Line %d\n",__LINE__);
     return 0;
 }
 
