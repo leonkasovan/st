@@ -59,6 +59,50 @@
 #define KEY_TAB SDLK_RCTRL // SELECT
 #define KEY_RETURN SDLK_RETURN // START
 
+#elif RG353P
+typedef enum RG353P_ButtonType{
+	RG353P_Button_B,
+	RG353P_Button_A,
+	RG353P_Button_X,
+	RG353P_Button_Y,
+	RG353P_Button_L1,
+	RG353P_Button_R1,
+	RG353P_Button_L2,
+	RG353P_Button_R2,
+	RG353P_Button_SELECT,
+	RG353P_Button_START,
+	RG353P_Button_F,
+	RG353P_Button_L3,
+	RG353P_Button_R3,
+	RG353P_Button_UP,
+	RG353P_Button_DOWN,
+	RG353P_Button_LEFT,
+	RG353P_Button_RIGHT
+} RG353P_ButtonType;
+
+typedef enum RG353P_AxisType{
+	RG353P_Axis_Joystick_Left_Horizontal,
+	RG353P_Axis_Joystick_Left_Vertical,
+	RG353P_Axis_Joystick_Right_Horizontal,
+	RG353P_Axis_Joystick_Right_Vertical,
+} RG353P_AxisType;
+
+#define JOY_UP RG353P_Button_UP
+#define JOY_DOWN RG353P_Button_DOWN
+#define JOY_LEFT RG353P_Button_LEFT
+#define JOY_RIGHT RG353P_Button_RIGHT
+#define JOY_ENTER RG353P_Button_A // A
+#define JOY_TOGGLE RG353P_Button_B // B
+#define JOY_BACKSPACE RG353P_Button_R1 // R
+#define JOY_SHIFT RG353P_Button_L1 // L
+#define JOY_LOCATION RG353P_Button_Y // Y
+#define JOY_ACTIVATE RG353P_Button_X // X
+#define JOY_QUIT RG353P_Button_F // MENU
+#define JOY_TAB RG353P_Button_SELECT // SELECT
+#define JOY_RETURN RG353P_Button_START // START
+#define JOY_ARROW_LEFT	RG353P_Button_L2 // L2
+#define JOY_ARROW_RIGHT	RG353P_Button_R2 // R2
+
 #endif
 
 #define KMOD_SYNTHETIC (1 << 13)
@@ -140,7 +184,11 @@ char* help =
 "  L2:       left\n"
 "  R2:       right\n"
 #endif
+#ifdef RG353P
+"  [F]:      quit\n\n"
+#else
 "  MENU:     quit\n\n"
+#endif
 "Cheatcheet (tutorial at www.shellscript.sh):\n"
 "  TAB key         complete path\n"
 "  UP/DOWN keys    navigate history\n"
@@ -161,7 +209,11 @@ void draw_keyboard(SDL_Surface* surface) {
 	unsigned short toggled_color = SDL_MapRGB(surface->format, 192, 192, 0);
 	if(show_help) {
 		SDL_FillRect(surface, NULL, text_color);
+#ifdef RG353P
+		draw_string(surface, "SDL(1.2) Terminal for RG353P", 0, 10, sel_toggled_color);
+#else		
 		draw_string(surface, "SDL Terminal by Benob, based on st-sdl", 0, 10, sel_toggled_color);
+#endif		
 		draw_string(surface, help, 8, 30, sel_color);
 		return;
 	}
@@ -279,6 +331,7 @@ int compute_new_col(int visual_offset, int old_row, int new_row) {
 	return new_col;
 }
 
+#ifndef RG353P
 int handle_keyboard_event(SDL_Event* event) {
 	static int visual_offset = 0;
 	if(event->key.type == SDL_KEYDOWN && !(event->key.keysym.mod & KMOD_SYNTHETIC) && event->key.keysym.sym == KEY_ACTIVATE) {
@@ -323,12 +376,6 @@ int handle_keyboard_event(SDL_Event* event) {
 		} else if(event->key.keysym.sym == KEY_ARROW_DOWN) {
 			simulate_key(SDLK_DOWN, STATE_TYPED);
 */
-#ifndef TRIMUISMART
-		} else if(event->key.keysym.sym == KEY_ARROW_LEFT) {
-			simulate_key(SDLK_LEFT, STATE_TYPED);
-		} else if(event->key.keysym.sym == KEY_ARROW_RIGHT) {
-			simulate_key(SDLK_RIGHT, STATE_TYPED);
-#endif
 		} else if(event->key.keysym.sym == KEY_TAB) {
 			simulate_key(SDLK_TAB, STATE_TYPED);
 		} else if(event->key.keysym.sym == KEY_RETURN) {
@@ -360,6 +407,96 @@ int handle_keyboard_event(SDL_Event* event) {
 			update_modstate(SDLK_LSHIFT, STATE_UP);
 		}
 	}
+	return 1;
+}
+#endif
+
+int handle_joystick_event(SDL_Event* event) {
+	static int visual_offset = 0;
+
+#ifdef RG353P
+	if(event->type == SDL_JOYAXISMOTION) { // not yet work
+		if (event->jaxis.axis == 0 && event->jaxis.value > 8000){	// move right
+			simulate_key(SDLK_TAB, STATE_TYPED);
+		} else if (event->jaxis.axis == 0 && event->jaxis.value < -8000){	// move left
+			simulate_key(SDLK_BACKSPACE, STATE_TYPED);
+		} else if (event->jaxis.axis == 1 && event->jaxis.value < -8000){	// move up
+			simulate_key(SDLK_UP, STATE_TYPED);
+		} else if (event->jaxis.axis == 1 && event->jaxis.value > 8000){	// move down
+			simulate_key(SDLK_DOWN, STATE_TYPED);
+		}
+		return 1;
+	}
+#endif
+	
+	if(event->type == SDL_JOYBUTTONDOWN && event->jbutton.button == JOY_ACTIVATE) {
+		active = ! active;
+		return 1;
+	}
+	if(!active) return 0;
+
+	if(event->type == SDL_JOYBUTTONDOWN && event->jbutton.state == 1) {
+		if(show_help) {
+			// do nothing
+		} else if(event->jbutton.button == JOY_QUIT) {
+			exit(0);
+		} else if(event->jbutton.button == JOY_UP && selected_j > 0) {
+			selected_i = compute_new_col(visual_offset, selected_j, selected_j - 1);
+			selected_j--;
+			//selected_i = selected_i * row_length[selected_j] / row_length[selected_j + 1];
+		} else if(event->jbutton.button == JOY_DOWN && selected_j < NUM_ROWS - 1) {
+			selected_i = compute_new_col(visual_offset, selected_j, selected_j + 1);
+			selected_j++;
+			//selected_i = selected_i * row_length[selected_j] / row_length[selected_j - 1];
+		} else if(event->jbutton.button == JOY_LEFT && selected_i > 0) {
+			selected_i--;
+			visual_offset = compute_visual_offset(selected_i, selected_j);
+		} else if(event->jbutton.button == JOY_RIGHT && selected_i < row_length[selected_j] - 1) {
+			selected_i++;
+			visual_offset = compute_visual_offset(selected_i, selected_j);
+		} else if(event->jbutton.button == JOY_SHIFT) {
+			shifted = 1;
+			toggled[4][0] = 1;
+			update_modstate(SDLK_LSHIFT, STATE_DOWN);
+		} else if(event->jbutton.button == JOY_LOCATION) {
+			location = !location;
+		} else if(event->jbutton.button == JOY_BACKSPACE) {
+			simulate_key(SDLK_BACKSPACE, STATE_TYPED);
+		} else if(event->jbutton.button == JOY_ARROW_LEFT) {
+			simulate_key(SDLK_LEFT, STATE_TYPED);
+		} else if(event->jbutton.button == JOY_ARROW_RIGHT) {
+			simulate_key(SDLK_RIGHT, STATE_TYPED);
+		} else if(event->jbutton.button == JOY_TAB) {
+			simulate_key(SDLK_TAB, STATE_TYPED);
+		} else if(event->jbutton.button == JOY_RETURN) {
+			simulate_key(SDLK_RETURN, STATE_TYPED);
+		} else if(event->jbutton.button == JOY_TOGGLE) {
+			toggled[selected_j][selected_i] = 1 - toggled[selected_j][selected_i];
+			if(toggled[selected_j][selected_i]) simulate_key(keys[shifted][selected_j][selected_i], STATE_DOWN);
+			else simulate_key(keys[shifted][selected_j][selected_i], STATE_UP);
+			if(selected_j == 4 && (selected_i == 0 || selected_i == 11)) shifted = toggled[selected_j][selected_i];
+		} else if(event->jbutton.button == JOY_ENTER) {
+			int key = keys[shifted][selected_j][selected_i];
+			if(mod_state & KMOD_CTRL) {
+				if (key >= 64 && key < 64 + 32) simulate_key(key - 64, STATE_DOWN);
+				else if (key >= 97 && key < 97 + 31) simulate_key(key - 96, STATE_DOWN);
+			} else if(mod_state & KMOD_SHIFT && key >= SDLK_a && key <= SDLK_z) {
+				simulate_key(key - SDLK_a + 'A', STATE_TYPED);
+			} else {
+				simulate_key(key, STATE_TYPED);
+			}
+		} else { 
+			fprintf(stderr,"key: %d",event->jbutton.button);
+		}
+	} else if(event->type == SDL_JOYBUTTONUP || event->jbutton.state == 0) {
+		if(show_help) {
+			show_help = 0;
+		} else if(event->jbutton.button == JOY_SHIFT) {
+			shifted = 0;
+			toggled[4][0] = 0;
+			update_modstate(SDLK_LSHIFT, STATE_UP);
+		}
+	} 
 	return 1;
 }
 
